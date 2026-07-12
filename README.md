@@ -48,8 +48,27 @@ Generates a 60-second video with smooth shifting gradient colors, synthesizes cu
 
 #### 2. Ken Burns Shorts (`ambient_youtube_shorts.py`)
 Selects a random image from `assets/images`, applies a Ken Burns zoom/pan effect, randomly mixes 2-3 audio tracks from `assets/audio` (adjusting volumes, fading, and looping as needed), merges them, and uploads the video as **Private**.
+
+You can customize the visual effects applied to the image and preview the output locally before uploading.
+
+##### Parameters:
+* `--effect`: Choose the video effect to apply. Options:
+  * `none` (default): Standard Ken Burns zoom-out.
+  * `particles`: Glowing dust motes floating and fading in/out.
+  * `drift`: Handheld drift/pan with subtle camera rotation oscillation.
+  * `pulse`: Slow brightness breathing effect simulating passing clouds.
+  * `light_leak`: Soft vintage warm orange color leak overlay.
+  * `rain`: Cozy diagonal falling raindrops.
+  * `all`: Combines all of the above effects for a rich, cinematic look.
+* `--no-upload`: Skips the YouTube upload process. This is extremely useful for rendering and reviewing the video locally (the output is saved as `final.mp4`).
+
+##### Examples:
 ```bash
-./venv/bin/python ambient_youtube_shorts.py
+# Preview a video with all effects combined locally without uploading
+./venv/bin/python ambient_youtube_shorts.py --effect all --no-upload
+
+# Generate and upload a video with rain overlay
+./venv/bin/python ambient_youtube_shorts.py --effect rain
 ```
 
 ---
