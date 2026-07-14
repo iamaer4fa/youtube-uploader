@@ -1,6 +1,6 @@
 import pickle
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import random, cv2, subprocess, os, argparse
 from pydub import AudioSegment
 
@@ -63,6 +63,91 @@ def create_video(effect="none"):
     total_frames = FPS * DURATION
     video = cv2.VideoWriter(TEMP_VIDEO, cv2.VideoWriter_fourcc(*"mp4v"), FPS, (WIDTH, HEIGHT))
     
+    # Load and parse verses from the verses/ directory
+    verses_dir = "verses"
+    verses = []
+    if os.path.exists(verses_dir):
+        for vf in sorted(os.listdir(verses_dir)):
+            if vf.endswith(".txt"):
+                path = os.path.join(verses_dir, vf)
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        lines = [l.strip() for l in f if l.strip()]
+                    if len(lines) >= 2:
+                        v_text = " ".join(lines[:-1])
+                        if (v_text.startswith("'") and v_text.endswith("'")) or (v_text.startswith('"') and v_text.endswith('"')):
+                            v_text = v_text[1:-1].strip()
+                        elif v_text.startswith("'"):
+                            v_text = v_text[1:].strip()
+                        elif v_text.endswith("'"):
+                            v_text = v_text[:-1].strip()
+                        v_ref = lines[-1]
+                        verses.append({"text": v_text, "ref": v_ref})
+                except Exception as e:
+                    print(f"Warning: Could not read verse file {vf}: {e}")
+
+    # Schedule verses within the video duration
+    scheduled_verses = []
+    verse_duration = 7.0  # 1s fade-in, 5s full, 1s fade-out (total 7s)
+    gap = 10.0
+    initial_delay = 4.0
+    
+    for k, verse in enumerate(verses[:3]):
+        t_start = initial_delay + k * (verse_duration + gap)
+        t_end = t_start + verse_duration
+        scheduled_verses.append({
+            "text": verse["text"],
+            "ref": verse["ref"],
+            "start": t_start,
+            "end": t_end,
+            "fade_in": 1.0,
+            "fade_out": 1.0
+        })
+
+    # Prepare fonts (Noto Serif)
+    text_font_candidates = [
+        "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
+        "DejaVuSerif.ttf"
+    ]
+    ref_font_candidates = [
+        "/usr/share/fonts/truetype/noto/NotoSerif-Italic.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSerifItalic.ttf",
+        "DejaVuSerif-Italic.ttf"
+    ]
+    
+    def load_font(candidates, size):
+        for path in candidates:
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+        
+    font_verse = load_font(text_font_candidates, 44)
+    font_ref = load_font(ref_font_candidates, 32)
+    
+    # Text wrapping helper
+    def wrap_text(text, font, max_width):
+        words = text.split()
+        lines = []
+        current_line = []
+        for word in words:
+            test_line = " ".join(current_line + [word]) if current_line else word
+            bbox = font.getbbox(test_line)
+            width = bbox[2] - bbox[0]
+            if width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(" ".join(current_line))
+                    current_line = [word]
+                else:
+                    lines.append(word)
+        if current_line:
+            lines.append(" ".join(current_line))
+        return lines
+
     print(f"Applying Ken Burns effect to {selected_image}...")
     zoom_start = 1.2
     zoom_end = 1.0
@@ -165,6 +250,98 @@ def create_video(effect="none"):
         if effect in ("pulse", "all"):
             pulse = 1.015 + 0.065 * np.sin(2 * np.pi * (i / (FPS * 8)))
             frame = np.clip(frame * pulse, 0, 255).astype(np.uint8)
+        
+        # Overlay active verse text if any
+        t = i / FPS
+        active_verse = None
+        for v in scheduled_verses:
+            if v["start"] <= t <= v["end"]:
+                active_verse = v
+                break
+                
+        if active_verse:
+            # Calculate current alpha (fade-in / fade-out)
+            if t < active_verse["start"] + active_verse["fade_in"]:
+                alpha = (t - active_verse["start"]) / active_verse["fade_in"]
+            elif t > active_verse["end"] - active_verse["fade_out"]:
+                alpha = (active_verse["end"] - t) / active_verse["fade_out"]
+            else:
+                alpha = 1.0
+            
+            # Clip alpha
+            alpha = max(0.0, min(1.0, alpha))
+            
+            if alpha > 0:
+                # Wrap text
+                max_text_width = 840
+                wrapped_lines = wrap_text(active_verse["text"], font_verse, max_text_width)
+                
+                # Calculate heights
+                line_spacing = 12
+                ref_gap = 40
+                
+                # Measure lines using a uniform line height for typography consistency
+                line_height = font_verse.getbbox("Qgp")[3] - font_verse.getbbox("Qgp")[1]
+                max_line_width = 0
+                for line in wrapped_lines:
+                    bbox = font_verse.getbbox(line)
+                    max_line_width = max(max_line_width, bbox[2] - bbox[0])
+                
+                # Measure reference
+                ref_text = active_verse["ref"]
+                ref_bbox = font_ref.getbbox(ref_text)
+                ref_w = ref_bbox[2] - ref_bbox[0]
+                ref_h = font_ref.getbbox("Qgp")[3] - font_ref.getbbox("Qgp")[1]
+                
+                # Calculate total text height
+                total_text_height = len(wrapped_lines) * line_height + line_spacing * (len(wrapped_lines) - 1) + ref_gap + ref_h
+                
+                # Center vertically
+                y_start = (HEIGHT - total_text_height) // 2
+                
+                # Backing card box
+                padding_x = 60
+                padding_y = 50
+                card_w = max(max_line_width, ref_w) + 2 * padding_x
+                card_h = total_text_height + 2 * padding_y
+                
+                left = (WIDTH - card_w) // 2
+                top = y_start - padding_y
+                right = left + card_w
+                bottom = top + card_h
+                
+                # Create a transparent RGBA image for drawing
+                overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(overlay)
+                
+                # Draw backing card
+                draw.rounded_rectangle([left, top, right, bottom], radius=20, fill=(0, 0, 0, 110), outline=(255, 255, 255, 30), width=2)
+                
+                # Draw verse text lines
+                y_curr = y_start
+                for line in wrapped_lines:
+                    line_w = font_verse.getbbox(line)[2] - font_verse.getbbox(line)[0]
+                    x_curr = (WIDTH - line_w) // 2
+                    # Shadow
+                    draw.text((x_curr + 2, y_curr + 2), line, font=font_verse, fill=(0, 0, 0, 180))
+                    # Text
+                    draw.text((x_curr, y_curr), line, font=font_verse, fill=(255, 255, 255, 255))
+                    y_curr += line_height + line_spacing
+                
+                # Draw reference
+                y_curr += ref_gap - line_spacing
+                x_ref = (WIDTH - ref_w) // 2
+                # Shadow
+                draw.text((x_ref + 2, y_curr + 2), ref_text, font=font_ref, fill=(0, 0, 0, 180))
+                # Reference text
+                draw.text((x_ref, y_curr), ref_text, font=font_ref, fill=(240, 240, 240, 255))
+                
+                # Blend overlay onto OpenCV BGR frame using numpy
+                overlay_np = np.array(overlay)
+                overlay_bgr = cv2.cvtColor(overlay_np[:, :, :3], cv2.COLOR_RGB2BGR)
+                alpha_mask = (overlay_np[:, :, 3:] / 255.0) * alpha
+                
+                frame = (frame * (1.0 - alpha_mask) + overlay_bgr * alpha_mask).astype(np.uint8)
         
         video.write(frame)
         if i % (FPS * 10) == 0 and i > 0:
