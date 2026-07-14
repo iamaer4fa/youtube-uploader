@@ -468,6 +468,29 @@ def cleanup():
             os.remove(f)
 
 # =========================
+# CUSTOM METADATA LOADER
+# =========================
+def load_custom_metadata(file_path):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Metadata file not found: {file_path}")
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    lines = content.splitlines()
+    desc_lines = []
+    tags = None
+    
+    for line in lines:
+        if line.lower().startswith("tags:"):
+            tags_str = line[5:].strip()
+            tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+        else:
+            desc_lines.append(line)
+            
+    desc = "\n".join(desc_lines).strip()
+    return desc, tags
+
+# =========================
 # MAIN
 # =========================
 def main():
@@ -483,6 +506,10 @@ def main():
         action="store_true",
         help="Skip uploading the video to YouTube."
     )
+    parser.add_argument(
+        "--metadata-file",
+        help="Path to an optional text file containing custom description and tags (case-insensitive 'tags: tag1, tag2' line specifies tags)."
+    )
     args = parser.parse_args()
 
     print(f"Generating video with effect: {args.effect}...")
@@ -496,6 +523,16 @@ def main():
 
     print("Preparing metadata...")
     title, desc, tags = metadata(image_name, sound_names)
+
+    if args.metadata_file:
+        try:
+            custom_desc, custom_tags = load_custom_metadata(args.metadata_file)
+            desc = custom_desc
+            if custom_tags is not None:
+                tags = custom_tags
+            print(f"Successfully loaded custom metadata from {args.metadata_file}")
+        except Exception as e:
+            print(f"Error loading custom metadata from {args.metadata_file}: {e}")
 
     if args.no_upload:
         print(f"Generated video: {FINAL_VIDEO}")

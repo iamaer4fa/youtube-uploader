@@ -61,6 +61,7 @@ You can customize the visual effects applied to the image and preview the output
   * `rain`: Cozy diagonal falling raindrops.
   * `all`: Combines all of the above effects for a rich, cinematic look.
 * `--no-upload`: Skips the YouTube upload process. This is extremely useful for rendering and reviewing the video locally (the output is saved as `final.mp4`).
+* `--metadata-file`: Optional path to a text file containing custom description and tags for the YouTube upload. The description is read from the file. You can define tags by including a line like `tags: relax, calm, ambient` in the file; if no such line is present, default tags are used.
 
 ##### Examples:
 ```bash
